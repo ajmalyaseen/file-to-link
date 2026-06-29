@@ -1,0 +1,9 @@
+# pyrofork: maintained drop-in fork of Pyrogram (imports as `pyrogram`),
+# supports modern Python (3.11-3.13) and large MTProto file transfers.
+pyrofork==2.3.62
+TgCrypto-pyrofork==1.2.7
+fastapi==0.115.4
+uvicorn==0.32.0
+python-dotenv==1.0.1
+# R2 (S3-compatible) uploads for merged files
+boto3==1.35.54
