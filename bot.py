@@ -168,7 +168,7 @@ async def cmd_newmerge(client: Client, message: Message) -> None:
     session_dir = config.SESSIONS_DIR / str(uid)
     utils.delete_path(session_dir)  # clear any stale leftovers
     session_dir.mkdir(parents=True, exist_ok=True)
-    merge_sessions[uid] = {"files": [], "dir": session_dir}
+    merge_sessions[uid] = {"files": [], "dir": session_dir, "lock": asyncio.Lock()}
 
     await message.reply_text(
         "🎬 **Merge session started!**\n\n"
@@ -279,32 +279,38 @@ async def on_media(client: Client, message: Message) -> None:
 
 async def _handle_episode(client: Client, message: Message, uid: int, file_name: str) -> None:
     session = merge_sessions[uid]
-    if len(session["files"]) >= config.MAX_BATCH_SIZE:
-        await message.reply_text(
-            f"Session is full (max {config.MAX_BATCH_SIZE}). Send /merge."
-        )
-        return
+    lock = session.setdefault("lock", asyncio.Lock())
 
-    n = len(session["files"]) + 1
-    ext = Path(file_name).suffix or ".mkv"
-    dest = session["dir"] / f"ep_{n:03d}{ext}"
-    dest.parent.mkdir(parents=True, exist_ok=True)
+    # Serialize per user: episodes sent in quick succession would otherwise race
+    # on the same ep_NNN filename and clobber each other's temp files.
+    async with lock:
+        if len(session["files"]) >= config.MAX_BATCH_SIZE:
+            await message.reply_text(
+                f"Session is full (max {config.MAX_BATCH_SIZE}). Send /merge."
+            )
+            return
 
-    status = await message.reply_text(f"⏬ Downloading episode {n}...")
-    try:
-        await client.download_media(
-            message, file_name=str(dest),
-            progress=_make_progress(status, f"⏬ Downloading episode {n}"),
-        )
-        session["files"].append(dest)
-        await status.edit_text(
-            f"Episode {n} received ✅\n"
-            f"Total episodes: {n}\n"
-            "Send the next one, or /merge when done."
-        )
-    except Exception as exc:  # noqa: BLE001
-        logger.exception("episode download failed")
-        await status.edit_text(f"❌ Failed to download episode {n}: {exc}")
+        n = len(session["files"]) + 1
+        ext = Path(file_name).suffix or ".mkv"
+        # Include message id to guarantee a unique temp path even under load.
+        dest = session["dir"] / f"ep_{n:03d}_{message.id}{ext}"
+        dest.parent.mkdir(parents=True, exist_ok=True)
+
+        status = await message.reply_text(f"⏬ Downloading episode {n}...")
+        try:
+            await client.download_media(
+                message, file_name=str(dest),
+                progress=_make_progress(status, f"⏬ Downloading episode {n}"),
+            )
+            session["files"].append(dest)
+            await status.edit_text(
+                f"Episode {n} received ✅\n"
+                f"Total episodes: {n}\n"
+                "Send the next one, or /merge when done."
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("episode download failed")
+            await status.edit_text(f"❌ Failed to download episode {n}: {exc}")
 
 
 async def _handle_single(
