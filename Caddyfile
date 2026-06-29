@@ -1,26 +1,30 @@
-# Caddy reverse proxy -> cleaner URLs (drops the :8080 port).
+# Caddy reverse proxy with FREE automatic HTTPS via sslip.io.
 #
-# IP-only mode (HTTP on port 80). Public certificate authorities don't issue
-# HTTPS certs for raw IPs, so this serves over HTTP. Your links become:
-#   http://136.110.36.47/stream/...
-# Set in .env:  BASE_URL=http://136.110.36.47
-http://136.110.36.47 {
+# sslip.io maps a hostname to your IP with no registration. Using a unique
+# prefix (here "alaska") gives a dedicated hostname so Let's Encrypt issues a
+# cert reliably. Caddy fetches + renews it automatically.
+#
+# Your links become:
+#   https://alaska.136.110.36.47.sslip.io/stream/...
+# Set in .env:  BASE_URL=https://alaska.136.110.36.47.sslip.io
+# Open ports 80 AND 443 in the GCP firewall (80 is needed for the cert challenge).
+
+alaska.136.110.36.47.sslip.io {
 	reverse_proxy bot:8080 {
 		# Stream bytes immediately (no buffering) — important for large downloads.
 		flush_interval -1
 	}
 }
 
-# --- RECOMMENDED: HTTPS with a domain ---------------------------------------
-# Real https:// needs a domain. A free one works great (e.g. DuckDNS):
-#   1. Create a subdomain at https://www.duckdns.org and point it to 136.110.36.47
-#   2. Uncomment the block below and replace the domain
-#   3. Set in .env:  BASE_URL=https://yourname.duckdns.org
-#   4. Open ports 80 AND 443 in the GCP firewall
-# Caddy then fetches and renews a free HTTPS certificate automatically.
+# --- Plain HTTP on the bare IP (optional fallback, no HTTPS) -----------------
+# Uncomment to also serve http://136.110.36.47/ directly.
 #
-# yourname.duckdns.org {
+# http://136.110.36.47 {
 # 	reverse_proxy bot:8080 {
 # 		flush_interval -1
 # 	}
 # }
+
+# --- Using a real/DuckDNS domain instead? -----------------------------------
+# Replace the hostname above with your domain (A record -> 136.110.36.47) and
+# set BASE_URL=https://yourdomain. Caddy handles the cert automatically.

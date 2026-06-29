@@ -85,12 +85,13 @@ API_HASH=2082adce3c41697ef60081760ffb80eb
 BOT_TOKEN=your-token
 SECRET_KEY=44e70dbbe365c3dca9220543912f85d32556ba4f2d7bd5e46ef7d17b04e83da9
 LOG_CHANNEL_ID=-100...           # your private storage channel
-BASE_URL=http://136.110.36.47    # via Caddy on port 80 (no :8080)
+BASE_URL=https://alaska.136.110.36.47.sslip.io   # free HTTPS via Caddy + sslip.io
 EXPIRY_SECONDS=86400
 ```
 
-> Using a domain for HTTPS? Set `BASE_URL=https://yourname.duckdns.org` instead
-> and enable the domain block in the `Caddyfile`.
+> The `Caddyfile` is preset to `alaska.136.110.36.47.sslip.io`. Change the
+> `alaska` prefix to whatever you like (keep `.136.110.36.47.sslip.io`), and
+> make `BASE_URL` match exactly.
 
 For near-zero egress (highly recommended), also set:
 ```
@@ -113,8 +114,8 @@ It auto-restarts on crash and on VM reboot.
 
 ## 6. Test
 
-Open the bot in Telegram → `/start` → send a file → you get a link at
-`http://136.110.36.47/stream/...` (clean, no port) that downloads anywhere.
+Open the bot in Telegram → `/start` → send a file → you get an HTTPS link at
+`https://alaska.136.110.36.47.sslip.io/stream/...` that downloads anywhere.
 
 ---
 
@@ -136,14 +137,15 @@ git pull
 docker compose up -d --build
 ```
 
-## URLs & HTTPS (Caddy is already included)
+## URLs & HTTPS (Caddy + sslip.io — already set up)
 
-`docker compose` runs **Caddy** in front of the bot, so your links are clean
-(`http://136.110.36.47/...`, no `:8080`).
+`docker compose` runs **Caddy**, which serves your bot over **free HTTPS** using
+sslip.io — no domain to buy. Links look like:
+`https://alaska.136.110.36.47.sslip.io/...`
 
-For real `https://`:
-1. Get a domain — a free **DuckDNS** subdomain works. Point it to `136.110.36.47`.
-2. In `Caddyfile`, uncomment the domain block and put your domain.
-3. Set `BASE_URL=https://yourname.duckdns.org` in `.env`.
-4. Make sure ports **80 and 443** are open (step 2).
-5. `docker compose up -d` — Caddy fetches a free HTTPS cert automatically.
+- The `Caddyfile` is preset; just keep ports **80 and 443** open (step 2) — port
+  80 is needed for the certificate challenge.
+- Change the `alaska` prefix in both the `Caddyfile` and `BASE_URL` if you want.
+
+Prefer your own/DuckDNS domain? Point its A record to the VM IP, swap the
+hostname in the `Caddyfile`, and set `BASE_URL=https://yourdomain`.
