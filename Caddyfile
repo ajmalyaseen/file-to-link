@@ -1,30 +1,28 @@
-# Caddy reverse proxy with FREE automatic HTTPS via sslip.io.
+# Caddy reverse proxy with FREE automatic HTTPS.
 #
-# sslip.io maps a hostname to your IP with no registration. Using a unique
-# prefix (here "alaska") gives a dedicated hostname so Let's Encrypt issues a
-# cert reliably. Caddy fetches + renews it automatically.
+# IMPORTANT: Telegram's "Download Now" (URL) buttons are REJECTED for hostnames
+# that embed an IP (like sslip.io). Use a DuckDNS domain (no embedded IP) so the
+# button works.
 #
-# Your links become:
-#   https://alaska.136.110.36.47.sslip.io/stream/...
-# Set in .env:  BASE_URL=https://alaska.136.110.36.47.sslip.io
-# Open ports 80 AND 443 in the GCP firewall (80 is needed for the cert challenge).
+# Setup DuckDNS (free):
+#   1. Go to https://www.duckdns.org, sign in, create a subdomain e.g. "alaskadl"
+#   2. Set its IP to your VM's external IP (136.110.36.47)
+#   3. Keep the domain below as alaskadl.duckdns.org (or change to your chosen name)
+#   4. In .env set:  BASE_URL=https://alaskadl.duckdns.org
+#   5. Open ports 80 AND 443 in the GCP firewall (80 is needed for the cert)
 
-alaska.136.110.36.47.sslip.io {
+alaskadl.duckdns.org {
 	reverse_proxy bot:8080 {
 		# Stream bytes immediately (no buffering) — important for large downloads.
 		flush_interval -1
 	}
 }
 
-# --- Plain HTTP on the bare IP (optional fallback, no HTTPS) -----------------
-# Uncomment to also serve http://136.110.36.47/ directly.
+# --- Alternative: sslip.io (free HTTPS, but URL BUTTONS won't work) ----------
+# Fine if you don't need the Download Now button (links still open as text).
 #
-# http://136.110.36.47 {
+# alaska.136.110.36.47.sslip.io {
 # 	reverse_proxy bot:8080 {
 # 		flush_interval -1
 # 	}
 # }
-
-# --- Using a real/DuckDNS domain instead? -----------------------------------
-# Replace the hostname above with your domain (A record -> 136.110.36.47) and
-# set BASE_URL=https://yourdomain. Caddy handles the cert automatically.

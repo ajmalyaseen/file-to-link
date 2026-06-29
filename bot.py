@@ -15,12 +15,14 @@ Series merge mode:
 from __future__ import annotations
 
 import asyncio
+import functools
 import logging
 import time
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from pyrogram import Client, filters, idle
+from pyrogram.errors import ButtonUrlInvalid
 from pyrogram.types import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
@@ -113,11 +115,18 @@ def _link_message(title: str, size: int) -> str:
 
 def _link_buttons(url: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
-        [
-            [InlineKeyboardButton("⬇️ Download Now", url=url)],
-            [InlineKeyboardButton("📋 Copy Link", copy_text=url)],
-        ]
+        [[InlineKeyboardButton("⬇️ Download Now", url=url)]]
     )
+
+
+async def _deliver(send, text: str, url: str) -> None:
+    """Send/edit a link message with a Download Now button. Falls back to a
+    plain text link if Telegram rejects the URL button (e.g. BUTTON_URL_INVALID
+    for IP-based hosts like sslip.io — use a DuckDNS/real domain to avoid that)."""
+    try:
+        await send(text=text, reply_markup=_link_buttons(url))
+    except ButtonUrlInvalid:
+        await send(text=f"{text}\n\n🔗 {url}")
 
 
 # --- commands ---------------------------------------------------------------
@@ -227,10 +236,11 @@ async def cmd_merge(client: Client, message: Message) -> None:
         utils.delete_path(session["dir"])
         merge_sessions.pop(uid, None)
 
-        await status.edit_text(
+        await _deliver(
+            functools.partial(status.edit_text, disable_web_page_preview=True),
             "✅ Done! Your merged series is ready 🎬\n\n"
             + _link_message("merged_video.mkv", size),
-            reply_markup=_link_buttons(url),
+            url,
         )
     except merger.MergeError as exc:
         logger.exception("merge failed")
@@ -334,9 +344,10 @@ async def _handle_single(
         config.SECRET_KEY,
         config.EXPIRY_SECONDS,
     )
-    await message.reply_text(
+    await _deliver(
+        functools.partial(message.reply_text, disable_web_page_preview=True),
         "Here's your download link 🎬\n\n" + _link_message(safe_name, file_size),
-        reply_markup=_link_buttons(url),
+        url,
     )
 
 
@@ -360,9 +371,10 @@ async def _handle_single_r2(
         url = await r2.presigned_url(key, config.EXPIRY_SECONDS)
         utils.delete_path(dest)
         asyncio.create_task(r2.schedule_delete(key, config.EXPIRY_SECONDS))
-        await status.edit_text(
+        await _deliver(
+            functools.partial(status.edit_text, disable_web_page_preview=True),
             "Here's your download link 🎬\n\n" + _link_message(safe_name, file_size),
-            reply_markup=_link_buttons(url),
+            url,
         )
     except Exception as exc:  # noqa: BLE001
         logger.exception("single-file R2 failed")

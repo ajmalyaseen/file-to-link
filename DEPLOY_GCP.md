@@ -85,13 +85,14 @@ API_HASH=2082adce3c41697ef60081760ffb80eb
 BOT_TOKEN=your-token
 SECRET_KEY=44e70dbbe365c3dca9220543912f85d32556ba4f2d7bd5e46ef7d17b04e83da9
 LOG_CHANNEL_ID=-100...           # your private storage channel
-BASE_URL=https://alaska.136.110.36.47.sslip.io   # free HTTPS via Caddy + sslip.io
+BASE_URL=https://alaskadl.duckdns.org   # DuckDNS domain (Download button works)
 EXPIRY_SECONDS=86400
 ```
 
-> The `Caddyfile` is preset to `alaska.136.110.36.47.sslip.io`. Change the
-> `alaska` prefix to whatever you like (keep `.136.110.36.47.sslip.io`), and
-> make `BASE_URL` match exactly.
+> **Why DuckDNS, not sslip.io?** Telegram rejects "Download Now" URL buttons for
+> hostnames that embed an IP (sslip.io does). A DuckDNS domain has no embedded
+> IP, so the button works. Register a free subdomain at https://www.duckdns.org,
+> point it to `136.110.36.47`, and match the name in `Caddyfile` + `BASE_URL`.
 
 For near-zero egress (highly recommended), also set:
 ```
