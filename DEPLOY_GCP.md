@@ -85,7 +85,7 @@ API_HASH=2082adce3c41697ef60081760ffb80eb
 BOT_TOKEN=your-token
 SECRET_KEY=44e70dbbe365c3dca9220543912f85d32556ba4f2d7bd5e46ef7d17b04e83da9
 LOG_CHANNEL_ID=-100...           # your private storage channel
-BASE_URL=https://alaskadl.duckdns.org   # DuckDNS domain (Download button works)
+BASE_URL=https://alaskafiletolink.duckdns.org   # DuckDNS domain (Download button works)
 EXPIRY_SECONDS=86400
 ```
 

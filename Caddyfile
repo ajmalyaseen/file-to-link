@@ -11,7 +11,7 @@
 #   4. In .env set:  BASE_URL=https://alaskadl.duckdns.org
 #   5. Open ports 80 AND 443 in the GCP firewall (80 is needed for the cert)
 
-alaskadl.duckdns.org {
+alaskafiletolink.duckdns.org {
 	reverse_proxy bot:8080 {
 		# Stream bytes immediately (no buffering) — important for large downloads.
 		flush_interval -1
