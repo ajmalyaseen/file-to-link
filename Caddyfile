@@ -1,5 +1,14 @@
 # Caddy reverse proxy with FREE automatic HTTPS.
 #
+# Global options: disable HTTP/3 (QUIC). On small VMs QUIC's UDP buffers are
+# too small, which causes very slow downloads and intermittent
+# ERR_SSL_PROTOCOL_ERROR. HTTP/2 over TCP is fast and reliable here.
+{
+	servers {
+		protocols h1 h2
+	}
+}
+
 # IMPORTANT: Telegram's "Download Now" (URL) buttons are REJECTED for hostnames
 # that embed an IP (like sslip.io). Use a DuckDNS domain (no embedded IP) so the
 # button works.

@@ -64,6 +64,11 @@ sudo chmod 600 /swapfile
 sudo mkswap /swapfile
 sudo swapon /swapfile
 echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+
+# Bigger network buffers (better download throughput)
+echo 'net.core.rmem_max=7500000' | sudo tee -a /etc/sysctl.conf
+echo 'net.core.wmem_max=7500000' | sudo tee -a /etc/sysctl.conf
+sudo sysctl -p
 ```
 
 ## 4. Get the code and configure
