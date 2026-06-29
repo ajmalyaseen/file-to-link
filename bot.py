@@ -288,6 +288,7 @@ async def _handle_episode(client: Client, message: Message, uid: int, file_name:
     n = len(session["files"]) + 1
     ext = Path(file_name).suffix or ".mkv"
     dest = session["dir"] / f"ep_{n:03d}{ext}"
+    dest.parent.mkdir(parents=True, exist_ok=True)
 
     status = await message.reply_text(f"⏬ Downloading episode {n}...")
     try:
@@ -360,6 +361,7 @@ async def _handle_single_r2(
     )
     disk_name = f"{int(time.time())}_{uid}_{safe_name}"
     dest = config.FILES_DIR / disk_name
+    dest.parent.mkdir(parents=True, exist_ok=True)
     key = f"single/{disk_name}"
     try:
         await client.download_media(

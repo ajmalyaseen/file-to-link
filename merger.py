@@ -93,6 +93,9 @@ async def merge_videos(user_id: int, files: List[Path]) -> Path:
     list_path = config.SESSIONS_DIR / f"{user_id}_concat.txt"
     meta_path = config.SESSIONS_DIR / f"{user_id}_chapters.txt"
 
+    output.parent.mkdir(parents=True, exist_ok=True)
+    list_path.parent.mkdir(parents=True, exist_ok=True)
+
     _write_concat_list(files, list_path)
     await create_chapter_metadata(files, meta_path)
 
