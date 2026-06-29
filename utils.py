@@ -17,11 +17,16 @@ import base64
 import hashlib
 import hmac
 import logging
+import re
 import time
 from pathlib import Path
 from urllib.parse import quote
 
 logger = logging.getLogger("file2link.utils")
+
+# Length of the HMAC signature kept in tokens. 20 hex chars = 80 bits, plenty
+# for short-lived signed links and far shorter URLs than a full 64-char digest.
+SIG_LEN = 20
 
 
 # --- HMAC signed URLs -------------------------------------------------------
@@ -29,11 +34,31 @@ logger = logging.getLogger("file2link.utils")
 def _hmac_hex(message: str, secret: str) -> str:
     return hmac.new(
         secret.encode("utf-8"), message.encode("utf-8"), hashlib.sha256
-    ).hexdigest()
+    ).hexdigest()[:SIG_LEN]
 
 
 def _sign(filename: str, expires_ts: int, secret: str) -> str:
     return _hmac_hex(f"{filename}:{expires_ts}", secret)
+
+
+# --- Filename cleanup -------------------------------------------------------
+
+def clean_filename(name: str) -> str:
+    """Strip uploader promo tags (@handles, [..]/(..) ad blocks, site names)."""
+    p = Path(name)
+    stem, ext = p.stem, p.suffix
+    # Remove bracketed promo blocks that contain @ (e.g. [@Series_World_TM]).
+    stem = re.sub(r"[\[\(\{][^\]\)\}]*@[^\]\)\}]*[\]\)\}]", "", stem)
+    # Remove leftover @handles.
+    stem = re.sub(r"@\S+", "", stem)
+    # Remove bare site names like Foo.com / bar.net.
+    stem = re.sub(r"\b[\w-]+\.(?:com|net|org|me|io|tv|info|xyz)\b", "", stem, flags=re.I)
+    # Collapse runs of separators into a single dot.
+    stem = re.sub(r"[\s._\-]{2,}", ".", stem)
+    stem = stem.strip(" ._-")
+    if not stem:
+        stem = "file"
+    return stem + ext
 
 
 def make_token(filename: str, secret: str, expires: int = 86400) -> str:

@@ -21,7 +21,11 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from pyrogram import Client, filters, idle
-from pyrogram.types import Message
+from pyrogram.types import (
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Message,
+)
 
 import config
 import merger
@@ -98,13 +102,21 @@ def _make_progress(status: Message, label: str):
     return progress
 
 
-def _link_message(title: str, size: int, url: str) -> str:
+def _link_message(title: str, size: int) -> str:
     hours = config.EXPIRY_SECONDS // 3600
     return (
         f"🎬 {title}\n"
         f"📦 Size: {utils.format_size(size)}\n"
-        f"⏱ Expires in: {hours} hours\n"
-        f"🔗 {url}"
+        f"⏱ Expires in: {hours} hours"
+    )
+
+
+def _link_buttons(url: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton("⬇️ Download Now", url=url)],
+            [InlineKeyboardButton("📋 Copy Link", copy_text=url)],
+        ]
     )
 
 
@@ -217,8 +229,8 @@ async def cmd_merge(client: Client, message: Message) -> None:
 
         await status.edit_text(
             "✅ Done! Your merged series is ready 🎬\n\n"
-            + _link_message(f"{uid}_merged.mkv", size, url),
-            disable_web_page_preview=True,
+            + _link_message("merged_video.mkv", size),
+            reply_markup=_link_buttons(url),
         )
     except merger.MergeError as exc:
         logger.exception("merge failed")
@@ -295,7 +307,7 @@ async def _handle_single(
         )
         return
 
-    safe_name = Path(file_name).name
+    safe_name = utils.clean_filename(Path(file_name).name)
 
     # R2 path: download once, upload to R2, serve free from R2 forever.
     if r2.is_configured() and config.R2_SINGLE_FILES:
@@ -323,8 +335,8 @@ async def _handle_single(
         config.EXPIRY_SECONDS,
     )
     await message.reply_text(
-        "Here's your download link 🎬\n\n" + _link_message(safe_name, file_size, url),
-        disable_web_page_preview=True,
+        "Here's your download link 🎬\n\n" + _link_message(safe_name, file_size),
+        reply_markup=_link_buttons(url),
     )
 
 
@@ -349,8 +361,8 @@ async def _handle_single_r2(
         utils.delete_path(dest)
         asyncio.create_task(r2.schedule_delete(key, config.EXPIRY_SECONDS))
         await status.edit_text(
-            "Here's your download link 🎬\n\n" + _link_message(safe_name, file_size, url),
-            disable_web_page_preview=True,
+            "Here's your download link 🎬\n\n" + _link_message(safe_name, file_size),
+            reply_markup=_link_buttons(url),
         )
     except Exception as exc:  # noqa: BLE001
         logger.exception("single-file R2 failed")
