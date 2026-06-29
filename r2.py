@@ -47,11 +47,14 @@ async def upload(path, key: str) -> None:
     logger.info("Uploaded to R2: %s", key)
 
 
-async def presigned_url(key: str, expires: int) -> str:
+async def presigned_url(key: str, expires: int, filename: str | None = None) -> str:
     def _do() -> str:
+        params = {"Bucket": config.R2_BUCKET, "Key": key}
+        if filename:
+            params["ResponseContentDisposition"] = f'attachment; filename="{filename}"'
         return _client().generate_presigned_url(
             "get_object",
-            Params={"Bucket": config.R2_BUCKET, "Key": key},
+            Params=params,
             ExpiresIn=int(expires),
         )
 

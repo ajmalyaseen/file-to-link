@@ -61,6 +61,24 @@ def clean_filename(name: str) -> str:
     return stem + ext
 
 
+def series_name_from(name: str) -> str:
+    """Derive a clean series title from an episode filename.
+    'Solo.Leveling.S02E12.1080p.x265.mkv' -> 'Solo Leveling'."""
+    base = clean_filename(name)
+    stem = Path(base).stem
+    # Cut at the first season/episode/quality/year marker.
+    m = re.search(
+        r"(?i)[ ._\-](s\d{1,2}e\d{1,3}|s\d{1,2}|e\d{1,3}|\d{3,4}p|x\d{3,4}|\d{4})",
+        stem,
+    )
+    if m and m.start() > 0:
+        stem = stem[: m.start()]
+    stem = re.sub(r"[ ._\-]+", " ", stem).strip()
+    if not stem:
+        stem = Path(base).stem
+    return stem.title()
+
+
 def make_token(filename: str, secret: str, expires: int = 86400) -> str:
     """Return a token string valid for `expires` seconds from now."""
     expires_ts = int(time.time()) + int(expires)

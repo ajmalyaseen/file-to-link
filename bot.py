@@ -158,7 +158,7 @@ async def cmd_newmerge(client: Client, message: Message) -> None:
     if not _authorized(uid):
         return
     if uid in merge_sessions:
-        n = len(merge_sessions[uid]["files"])
+        n = len(merge_sessions[uid]["messages"])
         await message.reply_text(
             f"⚠️ You already have an active merge session with {n} episode(s).\n"
             "Send /merge to finish it, or /cancel to start over."
@@ -168,13 +168,13 @@ async def cmd_newmerge(client: Client, message: Message) -> None:
     session_dir = config.SESSIONS_DIR / str(uid)
     utils.delete_path(session_dir)  # clear any stale leftovers
     session_dir.mkdir(parents=True, exist_ok=True)
-    merge_sessions[uid] = {"files": [], "dir": session_dir, "lock": asyncio.Lock()}
+    merge_sessions[uid] = {"messages": [], "dir": session_dir}
 
     await message.reply_text(
         "🎬 **Merge session started!**\n\n"
-        "Send your episode files one by one (in order). I'll confirm each one.\n"
-        "When you're done, send /merge.\n"
-        "Send /cancel anytime to abort."
+        f"Send all the episodes you want to merge (up to {config.MAX_BATCH_SIZE}).\n"
+        "When you're done, send /merge — I'll download, merge, and send one link.\n"
+        "Send /cancel to abort."
     )
 
 
@@ -202,25 +202,43 @@ async def cmd_merge(client: Client, message: Message) -> None:
         )
         return
 
-    files: List[Path] = session["files"]
-    if len(files) < 2:
+    queue: List[Message] = session["messages"]
+    if len(queue) < 2:
         await message.reply_text(
-            "⚠️ You need at least 2 episodes to merge. "
-            "Send more files, or /cancel."
+            "⚠️ Send at least 2 episodes before /merge, or /cancel."
         )
         return
 
-    status = await message.reply_text(f"Merging {len(files)} episodes... ⚙️")
+    total = len(queue)
+    status = await message.reply_text(f"⏬ Downloading {total} episodes...")
+    downloaded: List[Path] = []
     try:
-        merged_path = await merger.merge_videos(uid, files)
+        # Download all queued episodes now, in order, one at a time.
+        for i, msg in enumerate(queue, start=1):
+            info = _media_info(msg)
+            name = info[0] if info else f"ep_{i}.mkv"
+            ext = Path(name).suffix or ".mkv"
+            dest = session["dir"] / f"ep_{i:03d}{ext}"
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            await client.download_media(
+                msg, file_name=str(dest),
+                progress=_make_progress(status, f"⏬ Downloading episode {i}/{total}"),
+            )
+            downloaded.append(dest)
+
+        await status.edit_text(f"🎬 Merging {total} episodes... ⚙️")
+        merged_path = await merger.merge_videos(uid, downloaded)
         size = merged_path.stat().st_size
 
+        first_name = (_media_info(queue[0]) or ["video.mkv"])[0]
+        series = utils.series_name_from(first_name)
+        download_name = utils.clean_filename(series.replace(" ", ".") + ".mkv")
+
         if r2.is_configured():
-            await status.edit_text("☁️ Uploading merged file to storage...")
-            key = f"{uid}_{int(time.time())}_merged.mkv"
+            await status.edit_text("☁️ Uploading merged file...")
+            key = f"merged/{uid}_{int(time.time())}.mkv"
             await r2.upload(merged_path, key)
-            url = await r2.presigned_url(key, config.EXPIRY_SECONDS)
-            # Local copy no longer needed; R2 serves the download.
+            url = await r2.presigned_url(key, config.EXPIRY_SECONDS, filename=download_name)
             utils.delete_path(merged_path)
             asyncio.create_task(r2.schedule_delete(key, config.EXPIRY_SECONDS))
         else:
@@ -232,14 +250,9 @@ async def cmd_merge(client: Client, message: Message) -> None:
                 utils.schedule_cleanup(merged_path, config.EXPIRY_SECONDS)
             )
 
-        # Free disk: temp episodes no longer needed once merged.
-        utils.delete_path(session["dir"])
-        merge_sessions.pop(uid, None)
-
         await _deliver(
             functools.partial(status.edit_text, disable_web_page_preview=True),
-            "✅ Done! Your merged series is ready 🎬\n\n"
-            + _link_message("merged_video.mkv", size),
+            _link_message(series, size),
             url,
         )
     except merger.MergeError as exc:
@@ -248,6 +261,9 @@ async def cmd_merge(client: Client, message: Message) -> None:
     except Exception as exc:  # noqa: BLE001
         logger.exception("merge error")
         await status.edit_text(f"❌ Something went wrong during merge: {exc}")
+    finally:
+        utils.delete_path(session["dir"])
+        merge_sessions.pop(uid, None)
 
 
 # --- media ------------------------------------------------------------------
@@ -278,39 +294,19 @@ async def on_media(client: Client, message: Message) -> None:
 
 
 async def _handle_episode(client: Client, message: Message, uid: int, file_name: str) -> None:
+    """Queue an episode message (no download yet). Downloads happen at /merge."""
     session = merge_sessions[uid]
-    lock = session.setdefault("lock", asyncio.Lock())
-
-    # Serialize per user: episodes sent in quick succession would otherwise race
-    # on the same ep_NNN filename and clobber each other's temp files.
-    async with lock:
-        if len(session["files"]) >= config.MAX_BATCH_SIZE:
-            await message.reply_text(
-                f"Session is full (max {config.MAX_BATCH_SIZE}). Send /merge."
-            )
-            return
-
-        n = len(session["files"]) + 1
-        ext = Path(file_name).suffix or ".mkv"
-        # Include message id to guarantee a unique temp path even under load.
-        dest = session["dir"] / f"ep_{n:03d}_{message.id}{ext}"
-        dest.parent.mkdir(parents=True, exist_ok=True)
-
-        status = await message.reply_text(f"⏬ Downloading episode {n}...")
-        try:
-            await client.download_media(
-                message, file_name=str(dest),
-                progress=_make_progress(status, f"⏬ Downloading episode {n}"),
-            )
-            session["files"].append(dest)
-            await status.edit_text(
-                f"Episode {n} received ✅\n"
-                f"Total episodes: {n}\n"
-                "Send the next one, or /merge when done."
-            )
-        except Exception as exc:  # noqa: BLE001
-            logger.exception("episode download failed")
-            await status.edit_text(f"❌ Failed to download episode {n}: {exc}")
+    if len(session["messages"]) >= config.MAX_BATCH_SIZE:
+        await message.reply_text(
+            f"Session is full (max {config.MAX_BATCH_SIZE}). Send /merge."
+        )
+        return
+    session["messages"].append(message)
+    # Subtle, non-spammy acknowledgement (no per-episode text).
+    try:
+        await message.react("👍")
+    except Exception:  # noqa: BLE001
+        pass
 
 
 async def _handle_single(
