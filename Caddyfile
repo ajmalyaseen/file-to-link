@@ -1,0 +1,26 @@
+# Caddy reverse proxy -> cleaner URLs (drops the :8080 port).
+#
+# IP-only mode (HTTP on port 80). Public certificate authorities don't issue
+# HTTPS certs for raw IPs, so this serves over HTTP. Your links become:
+#   http://136.110.36.47/stream/...
+# Set in .env:  BASE_URL=http://136.110.36.47
+http://136.110.36.47 {
+	reverse_proxy bot:8080 {
+		# Stream bytes immediately (no buffering) — important for large downloads.
+		flush_interval -1
+	}
+}
+
+# --- RECOMMENDED: HTTPS with a domain ---------------------------------------
+# Real https:// needs a domain. A free one works great (e.g. DuckDNS):
+#   1. Create a subdomain at https://www.duckdns.org and point it to 136.110.36.47
+#   2. Uncomment the block below and replace the domain
+#   3. Set in .env:  BASE_URL=https://yourname.duckdns.org
+#   4. Open ports 80 AND 443 in the GCP firewall
+# Caddy then fetches and renews a free HTTPS certificate automatically.
+#
+# yourname.duckdns.org {
+# 	reverse_proxy bot:8080 {
+# 		flush_interval -1
+# 	}
+# }

@@ -36,14 +36,17 @@ Note the VM's **External IP** (you'll use it for `BASE_URL`).
 > I/O-bound (streaming + `-c copy` merges, no transcoding), so it performs great.
 > Network bandwidth on GCP scales with the VM and is plenty for downloads.
 
-## 2. Open the app port (8080)
+## 2. Open the web ports (80, and 443 if you use a domain)
 
 VPC network → Firewall → **Create firewall rule**:
-- Name: `allow-bot-8080`
+- Name: `allow-web`
 - Targets: All instances (or a tag)
 - Source IPv4 ranges: `0.0.0.0/0`
-- Protocols/ports: TCP `8080`
+- Protocols/ports: TCP `80,443`
 - Create.
+
+(Caddy listens on 80/443 and proxies to the bot internally, so you don't need
+to expose 8080 publicly.)
 
 ## 3. SSH in and prepare the VM
 
@@ -82,9 +85,12 @@ API_HASH=2082adce3c41697ef60081760ffb80eb
 BOT_TOKEN=your-token
 SECRET_KEY=44e70dbbe365c3dca9220543912f85d32556ba4f2d7bd5e46ef7d17b04e83da9
 LOG_CHANNEL_ID=-100...           # your private storage channel
-BASE_URL=http://YOUR_EXTERNAL_IP:8080
+BASE_URL=http://136.110.36.47    # via Caddy on port 80 (no :8080)
 EXPIRY_SECONDS=86400
 ```
+
+> Using a domain for HTTPS? Set `BASE_URL=https://yourname.duckdns.org` instead
+> and enable the domain block in the `Caddyfile`.
 
 For near-zero egress (highly recommended), also set:
 ```
@@ -108,7 +114,7 @@ It auto-restarts on crash and on VM reboot.
 ## 6. Test
 
 Open the bot in Telegram → `/start` → send a file → you get a link at
-`http://YOUR_EXTERNAL_IP:8080/stream/...` that downloads anywhere.
+`http://136.110.36.47/stream/...` (clean, no port) that downloads anywhere.
 
 ---
 
@@ -130,10 +136,14 @@ git pull
 docker compose up -d --build
 ```
 
-## Optional: HTTPS + clean domain
+## URLs & HTTPS (Caddy is already included)
 
-Direct `http://IP:8080` links work fine. If you want `https://yourdomain`:
-- Point a domain's A record to the VM IP.
-- Run Caddy as a reverse proxy (auto HTTPS) in front of port 8080.
-- Set `BASE_URL=https://yourdomain`.
-(Ask me and I'll add a Caddy service to docker-compose.)
+`docker compose` runs **Caddy** in front of the bot, so your links are clean
+(`http://136.110.36.47/...`, no `:8080`).
+
+For real `https://`:
+1. Get a domain — a free **DuckDNS** subdomain works. Point it to `136.110.36.47`.
+2. In `Caddyfile`, uncomment the domain block and put your domain.
+3. Set `BASE_URL=https://yourname.duckdns.org` in `.env`.
+4. Make sure ports **80 and 443** are open (step 2).
+5. `docker compose up -d` — Caddy fetches a free HTTPS cert automatically.

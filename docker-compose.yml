@@ -1,9 +1,26 @@
-# Run the bot on a server (e.g. GCP VM) with: docker compose up -d --build
-# It auto-restarts on crash/reboot and reads secrets from .env.
+# Run on your server (GCP VM) with: docker compose up -d --build
+# Caddy gives clean URLs (no :8080) and auto-HTTPS if you use a domain.
 services:
   bot:
     build: .
     restart: unless-stopped
     env_file: .env
+    expose:
+      - "8080"          # internal only; Caddy reaches it over the compose network
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on:
+      - bot
     ports:
-      - "8080:8080"
+      - "80:80"
+      - "443:443"       # used only when you enable a domain in the Caddyfile
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:
