@@ -62,13 +62,20 @@ def clean_filename(name: str) -> str:
 
 
 def series_name_from(name: str) -> str:
-    """Derive a clean series title from an episode filename.
-    'Solo.Leveling.S02E12.1080p.x265.mkv' -> 'Solo Leveling'."""
+    """Derive a clean series title + season from an episode filename.
+    'Solo.Leveling.S02E12.1080p.x265.mkv' -> 'Solo Leveling S02'
+    'The.Last.of.Us.S01E03.720p.WEB.mkv'  -> 'The Last Of Us S01'
+    'Inception.2010.1080p.BluRay.mkv'     -> 'Inception'"""
     base = clean_filename(name)
     stem = Path(base).stem
-    # Cut at the first season/episode/quality/year marker.
+    # Extract season tag if present (S01, S02, etc.)
+    season = ""
+    sm = re.search(r"(?i)[. _\-](S\d{1,2})(?:E\d{1,3})?", stem)
+    if sm:
+        season = " " + sm.group(1).upper()
+    # Cut stem at the first season/episode/quality/year marker.
     m = re.search(
-        r"(?i)[ ._\-](s\d{1,2}e\d{1,3}|s\d{1,2}|e\d{1,3}|\d{3,4}p|x\d{3,4}|\d{4})",
+        r"(?i)[ ._\-](s\d{1,2}e\d{1,3}|s\d{1,2}|e\d{1,3}|\d{3,4}p|x\d{3,4}|hevc|avc|\d{4})",
         stem,
     )
     if m and m.start() > 0:
@@ -76,7 +83,38 @@ def series_name_from(name: str) -> str:
     stem = re.sub(r"[ ._\-]+", " ", stem).strip()
     if not stem:
         stem = Path(base).stem
-    return stem.title()
+    return (stem.title() + season).strip()
+
+
+def extract_quality(name: str) -> str:
+    """Extract resolution+bit-depth tag, e.g. '1080p · 10Bit' or '720p'."""
+    parts = []
+    m = re.search(r"(\d{3,4})[pP]", name)
+    if m:
+        parts.append(m.group(0).lower().replace("p", "p"))
+    if re.search(r"10.?[Bb]it|10b", name, re.I):
+        parts.append("10Bit")
+    return " · ".join(parts) if parts else "—"
+
+
+def extract_format(name: str) -> str:
+    """Return container format from filename extension."""
+    ext = Path(name).suffix.lstrip(".").upper()
+    return ext if ext else "MKV"
+
+
+def extract_episode_range(files_names: list[str]) -> str:
+    """Given a list of episode filenames, return e.g. 'E01 → E04'."""
+    nums = []
+    for n in files_names:
+        m = re.search(r"[Ee](\d{1,3})", n)
+        if m:
+            nums.append(int(m.group(1)))
+    if len(nums) >= 2:
+        return f"E{min(nums):02d} → E{max(nums):02d}"
+    if len(nums) == 1:
+        return f"E{nums[0]:02d}"
+    return f"{len(files_names)} files"
 
 
 def make_token(filename: str, secret: str, expires: int = 86400) -> str:

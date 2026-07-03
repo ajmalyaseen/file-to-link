@@ -118,6 +118,40 @@ def _link_message(title: str, size: int) -> str:
     )
 
 
+def _merge_link_message(
+    series: str,
+    ep_range: str,
+    size: int,
+    duration: float,
+    quality: str,
+    fmt: str,
+    ep_count: int,
+    url: str,
+) -> tuple[str, InlineKeyboardMarkup]:
+    hours = config.EXPIRY_SECONDS // 3600
+    text = (
+        f"🎞 **{series}**\n"
+        f"_{ep_range} • Merged_\n"
+        "——————————————\n"
+        f"🔮 Size      »  {utils.format_size(size)}\n"
+        f"🕐 Duration  »  {utils.format_duration(duration)}\n"
+        f"📺 Quality   »  {quality}\n"
+        f"📁 Format    »  {fmt}\n"
+        f"🔖 Chapters  »  {ep_count} episodes\n"
+        "——————————————\n"
+        f"⏳ Expires in  »  {hours} hours\n\n"
+        f"🔗 `{url}`\n\n"
+        "📌 @AlaskaBotz"
+    )
+    buttons = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("📋 Copy Direct Link", copy_text=url),
+            InlineKeyboardButton("⬇️ Download Now", url=url),
+        ]
+    ])
+    return text, buttons
+
+
 def _link_buttons(url: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [[InlineKeyboardButton("⬇️ Download Now", url=url)]]
@@ -368,11 +402,22 @@ async def cmd_merge(client: Client, message: Message) -> None:
             size = merged_path.stat().st_size
 
             first_name = (_media_info(queue[0]) or ["video.mkv"])[0]
-            series = utils.series_name_from(first_name)
+            last_name  = (_media_info(queue[-1]) or ["video.mkv"])[0]
+            series  = utils.series_name_from(first_name)
+            ep_range = utils.extract_episode_range([
+                (_media_info(m) or [""])[0] for m in queue
+            ])
+            quality  = utils.extract_quality(first_name)
+            fmt      = utils.extract_format(first_name)
             download_name = utils.clean_filename(series.replace(" ", ".") + ".mkv")
 
+            # Get total duration of the merged file.
+            try:
+                duration = await merger.get_video_duration(merged_path)
+            except Exception:  # noqa: BLE001
+                duration = 0.0
+
             if r2.is_configured():
-                # Pass status_msg so upload() shows live progress.
                 key = f"merged/{uid}_{int(time.time())}.mkv"
                 await r2.upload(merged_path, key, status_msg=status)
                 url = await r2.presigned_url(
@@ -389,11 +434,16 @@ async def cmd_merge(client: Client, message: Message) -> None:
                     utils.schedule_cleanup(merged_path, config.EXPIRY_SECONDS)
                 )
 
-            await _deliver(
-                functools.partial(status.edit_text, disable_web_page_preview=True),
-                _link_message(series, size),
-                url,
+            text, buttons = _merge_link_message(
+                series, ep_range, size, duration, quality, fmt, total, url
             )
+            try:
+                await status.edit_text(text, reply_markup=buttons)
+            except ButtonUrlInvalid:
+                # Download Now button rejected (IP-based URL) — fall back.
+                await status.edit_text(f"{text}", reply_markup=InlineKeyboardMarkup(
+                    [[InlineKeyboardButton("📋 Copy Direct Link", copy_text=url)]]
+                ))
         except merger.MergeError as exc:
             logger.exception("merge failed")
             await status.edit_text(f"❌ Merge failed.\n\n{exc}")
