@@ -43,8 +43,12 @@ logging.basicConfig(
 logging.getLogger("pyrogram").setLevel(logging.WARNING)
 logger = logging.getLogger("file2link.bot")
 
-# user_id -> {"files": [Path, ...], "dir": Path}
+# user_id -> {"messages": [Message, ...], "dir": Path}
 merge_sessions: Dict[int, dict] = {}
+
+# Limit concurrent merges to protect e2-micro (1 GB RAM, limited disk).
+# Multiple simultaneous FFmpeg processes + downloads → OOM crash.
+merge_semaphore = asyncio.Semaphore(2)
 
 app = Client(
     config.SESSION_NAME,
@@ -209,61 +213,72 @@ async def cmd_merge(client: Client, message: Message) -> None:
         )
         return
 
+    # Protect e2-micro from OOM: cap concurrent merges at 2.
+    if merge_semaphore.locked():
+        await message.reply_text(
+            "⏳ Server is busy with another merge. Please wait a moment and try again."
+        )
+        return
+
     total = len(queue)
     status = await message.reply_text(f"⏬ Downloading {total} episodes...")
     downloaded: List[Path] = []
-    try:
-        # Download all queued episodes now, in order, one at a time.
-        for i, msg in enumerate(queue, start=1):
-            info = _media_info(msg)
-            name = info[0] if info else f"ep_{i}.mkv"
-            ext = Path(name).suffix or ".mkv"
-            dest = session["dir"] / f"ep_{i:03d}{ext}"
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            await client.download_media(
-                msg, file_name=str(dest),
-                progress=_make_progress(status, f"⏬ Downloading episode {i}/{total}"),
+
+    async with merge_semaphore:
+        try:
+            # Download all queued episodes, in order, one at a time.
+            for i, msg in enumerate(queue, start=1):
+                info = _media_info(msg)
+                name = info[0] if info else f"ep_{i}.mkv"
+                ext = Path(name).suffix or ".mkv"
+                dest = session["dir"] / f"ep_{i:03d}{ext}"
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                await client.download_media(
+                    msg, file_name=str(dest),
+                    progress=_make_progress(status, f"⏬ Downloading episode {i}/{total}"),
+                )
+                downloaded.append(dest)
+
+            await status.edit_text(f"🎬 Merging {total} episodes... ⚙️")
+            merged_path = await merger.merge_videos(uid, downloaded)
+            size = merged_path.stat().st_size
+
+            first_name = (_media_info(queue[0]) or ["video.mkv"])[0]
+            series = utils.series_name_from(first_name)
+            download_name = utils.clean_filename(series.replace(" ", ".") + ".mkv")
+
+            if r2.is_configured():
+                # Pass status_msg so upload() shows live progress.
+                key = f"merged/{uid}_{int(time.time())}.mkv"
+                await r2.upload(merged_path, key, status_msg=status)
+                url = await r2.presigned_url(
+                    key, config.EXPIRY_SECONDS, filename=download_name
+                )
+                utils.delete_path(merged_path)
+                asyncio.create_task(r2.schedule_delete(key, config.EXPIRY_SECONDS))
+            else:
+                url = utils.generate_signed_url(
+                    merged_path.name, config.BASE_URL, config.SECRET_KEY,
+                    config.EXPIRY_SECONDS,
+                )
+                asyncio.create_task(
+                    utils.schedule_cleanup(merged_path, config.EXPIRY_SECONDS)
+                )
+
+            await _deliver(
+                functools.partial(status.edit_text, disable_web_page_preview=True),
+                _link_message(series, size),
+                url,
             )
-            downloaded.append(dest)
-
-        await status.edit_text(f"🎬 Merging {total} episodes... ⚙️")
-        merged_path = await merger.merge_videos(uid, downloaded)
-        size = merged_path.stat().st_size
-
-        first_name = (_media_info(queue[0]) or ["video.mkv"])[0]
-        series = utils.series_name_from(first_name)
-        download_name = utils.clean_filename(series.replace(" ", ".") + ".mkv")
-
-        if r2.is_configured():
-            await status.edit_text("☁️ Uploading merged file...")
-            key = f"merged/{uid}_{int(time.time())}.mkv"
-            await r2.upload(merged_path, key)
-            url = await r2.presigned_url(key, config.EXPIRY_SECONDS, filename=download_name)
-            utils.delete_path(merged_path)
-            asyncio.create_task(r2.schedule_delete(key, config.EXPIRY_SECONDS))
-        else:
-            url = utils.generate_signed_url(
-                merged_path.name, config.BASE_URL, config.SECRET_KEY,
-                config.EXPIRY_SECONDS,
-            )
-            asyncio.create_task(
-                utils.schedule_cleanup(merged_path, config.EXPIRY_SECONDS)
-            )
-
-        await _deliver(
-            functools.partial(status.edit_text, disable_web_page_preview=True),
-            _link_message(series, size),
-            url,
-        )
-    except merger.MergeError as exc:
-        logger.exception("merge failed")
-        await status.edit_text(f"❌ Merge failed.\n\n{exc}")
-    except Exception as exc:  # noqa: BLE001
-        logger.exception("merge error")
-        await status.edit_text(f"❌ Something went wrong during merge: {exc}")
-    finally:
-        utils.delete_path(session["dir"])
-        merge_sessions.pop(uid, None)
+        except merger.MergeError as exc:
+            logger.exception("merge failed")
+            await status.edit_text(f"❌ Merge failed.\n\n{exc}")
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("merge error")
+            await status.edit_text(f"❌ Something went wrong: {exc}")
+        finally:
+            utils.delete_path(session["dir"])
+            merge_sessions.pop(uid, None)
 
 
 # --- media ------------------------------------------------------------------

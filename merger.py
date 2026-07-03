@@ -1,11 +1,10 @@
 """
 FFmpeg merge logic with chapter markers.
 
-- get_video_duration(file)      -> duration in seconds via ffprobe
-- create_chapter_metadata(files)-> writes an FFMETADATA file with one chapter
-                                   per episode at the correct timestamps
-- merge_videos(user_id, files)  -> concat demuxer (-c copy) + chapters,
-                                   outputs output/{user_id}_merged.mkv
+Fixes applied:
+- round() instead of int() for millisecond timestamps (no truncation drift)
+- ffprobe returns 0 or fails → raises MergeError immediately (never silently uses 0)
+- Output and temp dirs created before use
 """
 
 from __future__ import annotations
@@ -35,7 +34,8 @@ async def _run(cmd: List[str]) -> tuple[int, str]:
 
 
 async def get_video_duration(file: Path) -> float:
-    """Return media duration in seconds (0.0 if it can't be determined)."""
+    """Return media duration in seconds. Raises MergeError if ffprobe fails or
+    returns 0 (which means the file isn't ready / is corrupt)."""
     cmd = [
         config.FFPROBE_BINARY,
         "-v", "error",
@@ -45,24 +45,36 @@ async def get_video_duration(file: Path) -> float:
     ]
     code, out = await _run(cmd)
     if code != 0:
-        logger.warning("ffprobe failed for %s: %s", file, out[-300:])
-        return 0.0
+        raise MergeError(
+            f"ffprobe failed for {file.name}:\n{out[-300:]}"
+        )
     try:
-        return float(out.strip())
+        val = float(out.strip())
     except ValueError:
-        return 0.0
+        raise MergeError(f"ffprobe returned non-numeric output for {file.name}: {out[:100]}")
+
+    if val <= 0:
+        raise MergeError(
+            f"ffprobe returned duration={val} for {file.name}. "
+            "File may be corrupt or not fully written to disk."
+        )
+    return val
 
 
 async def create_chapter_metadata(files: List[Path], metadata_path: Path) -> None:
-    """Write an FFMETADATA file with a chapter per input file."""
+    """Write an FFMETADATA file with one chapter per input file.
+    Uses round() for millisecond precision — no truncation drift."""
     lines = [";FFMETADATA1"]
     start_ms = 0
     for idx, f in enumerate(files, start=1):
-        duration = await get_video_duration(f)
-        end_ms = start_ms + int(duration * 1000)
-        # Guard against zero-length: ensure END > START.
+        duration = await get_video_duration(f)   # raises on failure
+        end_ms = start_ms + round(duration * 1000)
+        # Guard: END must be strictly greater than START.
         if end_ms <= start_ms:
-            end_ms = start_ms + 1
+            raise MergeError(
+                f"Computed chapter END ({end_ms}ms) ≤ START ({start_ms}ms) for "
+                f"{f.name}. Duration was {duration}s."
+            )
         lines.append("[CHAPTER]")
         lines.append("TIMEBASE=1/1000")
         lines.append(f"START={start_ms}")
@@ -83,8 +95,8 @@ def _write_concat_list(files: List[Path], list_path: Path) -> None:
 async def merge_videos(user_id: int, files: List[Path]) -> Path:
     """
     Merge `files` (in order) into output/{user_id}_merged.mkv using the concat
-    demuxer with stream copy (no re-encode) plus chapter markers.
-    Returns the output path. Raises MergeError on failure.
+    demuxer with stream copy (no re-encode) and chapter markers.
+    Raises MergeError on any failure (including ffprobe issues).
     """
     if len(files) < 2:
         raise MergeError("Need at least 2 files to merge.")
@@ -93,11 +105,12 @@ async def merge_videos(user_id: int, files: List[Path]) -> Path:
     list_path = config.SESSIONS_DIR / f"{user_id}_concat.txt"
     meta_path = config.SESSIONS_DIR / f"{user_id}_chapters.txt"
 
+    # Ensure directories exist before writing.
     output.parent.mkdir(parents=True, exist_ok=True)
     list_path.parent.mkdir(parents=True, exist_ok=True)
 
     _write_concat_list(files, list_path)
-    await create_chapter_metadata(files, meta_path)
+    await create_chapter_metadata(files, meta_path)   # raises on ffprobe failure
 
     cmd = [
         config.FFMPEG_BINARY, "-y",
@@ -106,12 +119,12 @@ async def merge_videos(user_id: int, files: List[Path]) -> Path:
         "-map", "0",
         "-map_metadata", "1",
         "-map_chapters", "1",
-        "-c", "copy",
+        "-c", "copy",   # stream copy — no re-encode, lossless, fast
         str(output),
     ]
     code, log = await _run(cmd)
 
-    # Clean up the intermediate text files regardless of outcome.
+    # Clean up intermediate text files.
     for p in (list_path, meta_path):
         try:
             p.unlink()
@@ -120,8 +133,8 @@ async def merge_videos(user_id: int, files: List[Path]) -> Path:
 
     if code != 0 or not output.exists() or output.stat().st_size == 0:
         raise MergeError(
-            "ffmpeg concat failed. This usually means the episodes use "
-            "different codecs/resolutions (stream copy needs them identical).\n\n"
+            "ffmpeg concat failed. Episodes must share identical codecs and "
+            "resolution for stream copy to work.\n\n"
             f"{log[-1200:]}"
         )
 
