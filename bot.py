@@ -118,6 +118,31 @@ def _link_message(title: str, size: int) -> str:
     )
 
 
+def _single_link_message(name: str, size: int, url: str) -> tuple[str, InlineKeyboardMarkup]:
+    hours = config.EXPIRY_SECONDS // 3600
+    series = utils.series_name_from(name)
+    quality = utils.extract_quality(name)
+    fmt = utils.extract_format(name)
+    text = (
+        f"🎞 **{series}**\n"
+        "——————————————\n"
+        f"🔮 Size      »  {utils.format_size(size)}\n"
+        f"📺 Quality   »  {quality}\n"
+        f"📁 Format    »  {fmt}\n"
+        "——————————————\n"
+        f"⏳ Expires in  »  {hours} hours\n\n"
+        f"🔗 `{url}`\n\n"
+        "📌 @AlaskaBotz"
+    )
+    buttons = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("📋 Copy Direct Link", copy_text=url),
+            InlineKeyboardButton("⬇️ Download Now", url=url),
+        ]
+    ])
+    return text, buttons
+
+
 def _merge_link_message(
     series: str,
     ep_range: str,
@@ -552,11 +577,16 @@ async def _handle_single(
         config.SECRET_KEY,
         config.EXPIRY_SECONDS,
     )
-    await _deliver(
-        functools.partial(message.reply_text, disable_web_page_preview=True),
-        "Here's your download link 🎬\n\n" + _link_message(safe_name, file_size),
-        url,
-    )
+    text, buttons = _single_link_message(safe_name, file_size, url)
+    try:
+        await message.reply_text(text, reply_markup=buttons)
+    except ButtonUrlInvalid:
+        await message.reply_text(
+            text,
+            reply_markup=InlineKeyboardMarkup(
+                [[InlineKeyboardButton("📋 Copy Direct Link", copy_text=url)]]
+            ),
+        )
 
 
 async def _handle_single_r2(
@@ -580,11 +610,16 @@ async def _handle_single_r2(
         url = await r2.presigned_url(key, config.EXPIRY_SECONDS)
         utils.delete_path(dest)
         asyncio.create_task(r2.schedule_delete(key, config.EXPIRY_SECONDS))
-        await _deliver(
-            functools.partial(status.edit_text, disable_web_page_preview=True),
-            "Here's your download link 🎬\n\n" + _link_message(safe_name, file_size),
-            url,
-        )
+        text, buttons = _single_link_message(safe_name, file_size, url)
+        try:
+            await status.edit_text(text, reply_markup=buttons)
+        except ButtonUrlInvalid:
+            await status.edit_text(
+                text,
+                reply_markup=InlineKeyboardMarkup(
+                    [[InlineKeyboardButton("📋 Copy Direct Link", copy_text=url)]]
+                ),
+            )
     except Exception as exc:  # noqa: BLE001
         logger.exception("single-file R2 failed")
         utils.delete_path(dest)
