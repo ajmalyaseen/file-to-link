@@ -48,6 +48,13 @@ ALLOWED_USER_IDS = (
 # stream from the user's original message instead (less robust).
 LOG_CHANNEL_ID = _get_int("LOG_CHANNEL_ID", 0)
 
+# Telegram channel username for the Updates button (no @).
+UPDATES_CHANNEL = os.getenv("UPDATES_CHANNEL", "AlaskaBotz")
+
+# Force-subscribe channel. Users must join before using the bot.
+# Set to your channel username (no @), e.g. "AlaskaBotz". Empty = disabled.
+FORCE_SUB_CHANNEL = os.getenv("FORCE_SUB_CHANNEL", "")
+
 # --- Download server / signed links -----------------------------------------
 # Public base URL users will reach (used to build download links).
 BASE_URL = os.getenv("BASE_URL", "http://127.0.0.1:8080").rstrip("/")
@@ -74,9 +81,14 @@ FFMPEG_BINARY = os.getenv("FFMPEG_BINARY", "ffmpeg")
 FFPROBE_BINARY = os.getenv("FFPROBE_BINARY", "ffprobe")
 MAX_BATCH_SIZE = _get_int("MAX_BATCH_SIZE", 50)
 
-# Telegram's hard ceiling: 4 GB per file (files >2 GB must be uploaded by a
-# Premium user). MTProto can download up to this limit.
+# Telegram's hard ceiling per file via MTProto.
+# Normal accounts: up to 2 GB upload. Premium: up to 4 GB upload.
+# Bot can download up to 4 GB. For merging, total size across all episodes
+# can be up to 15 GB (limited by available disk, not Telegram).
 MAX_FILE_BYTES = _get_int("MAX_FILE_BYTES", 4 * 1024 * 1024 * 1024)
+
+# Maximum total size of all episodes in a single merge session (15 GB).
+MAX_MERGE_TOTAL_BYTES = _get_int("MAX_MERGE_TOTAL_BYTES", 15 * 1024 * 1024 * 1024)
 
 
 # --- Cloudflare R2 (zero-egress storage for merged files) -------------------

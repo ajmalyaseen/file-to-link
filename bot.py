@@ -24,6 +24,7 @@ from typing import Dict, List, Optional, Tuple
 from pyrogram import Client, filters, idle
 from pyrogram.errors import ButtonUrlInvalid
 from pyrogram.types import (
+    BotCommand,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     Message,
@@ -135,31 +136,154 @@ async def _deliver(send, text: str, url: str) -> None:
 
 # --- commands ---------------------------------------------------------------
 
+def _main_menu() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("💡 Help", callback_data="help_menu"),
+         InlineKeyboardButton("ℹ️ Bot Info", callback_data="about")],
+        [InlineKeyboardButton("📢 Updates", url=f"https://t.me/{config.UPDATES_CHANNEL}"),
+         InlineKeyboardButton("❌ Close", callback_data="close")],
+    ])
+
+
+def _back_btn() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [[InlineKeyboardButton("🔙 Back", callback_data="back_home")]]
+    )
+
+
+async def _check_subscription(client: Client, user_id: int) -> bool:
+    """Return True if force-sub is disabled or the user has joined the channel."""
+    if not config.FORCE_SUB_CHANNEL:
+        return True
+    try:
+        member = await client.get_chat_member(
+            f"@{config.FORCE_SUB_CHANNEL}", user_id
+        )
+        return member.status.value not in ("left", "banned", "kicked")
+    except Exception:  # noqa: BLE001
+        return False
+
+
+async def _force_sub_message(message: Message) -> None:
+    """Tell the user they must join the channel first."""
+    await message.reply_text(
+        "👋 **Welcome!**\n\n"
+        "To use this bot, please **join our channel** first.\n"
+        "Then come back and send /start.",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton(
+                "📢 Join Channel",
+                url=f"https://t.me/{config.FORCE_SUB_CHANNEL}"
+            )],
+            [InlineKeyboardButton("✅ I've Joined", callback_data="check_sub")],
+        ]),
+    )
+
+
 @app.on_message(filters.command(["start", "help"]) & filters.private)
 async def cmd_start(client: Client, message: Message) -> None:
     if not _authorized(message.from_user.id):
         await message.reply_text("Sorry, you're not authorized to use this bot.")
         return
-    await message.reply_text(
-        "👋 **File-to-Link Bot**\n\n"
-        "I turn Telegram files into direct download links (up to ~2 GB each).\n\n"
-        "**📁 Single file mode** (default)\n"
-        "Just send me any video or document. I'll reply with a download link "
-        "that works in any browser and expires in 24 hours.\n\n"
-        "**🎬 Series merge mode**\n"
-        "1. /newmerge — start a merge session\n"
-        "2. Send your episodes one by one\n"
-        "3. /merge — I merge them into one file (with chapter markers) and "
-        "send a single download link\n"
-        "4. /cancel — abort and delete temp files\n\n"
-        "Every link auto-expires after 24 hours and the file is cleaned up."
+    if not await _check_subscription(client, message.from_user.id):
+        await _force_sub_message(message)
+        return
+    await _send_home(message.reply_text, message.from_user.first_name or "there")
+
+
+async def _send_home(send_fn, name: str) -> None:
+    hours = config.EXPIRY_SECONDS // 3600
+    await send_fn(
+        f"👋 Hey **{name}**,\n\n"
+        "Your instant **File‑to‑Link** bot.\n"
+        "Send any video or document and I'll give you a direct download link "
+        f"that works in any browser — expires in **{hours} hours**.\n\n"
+        "🎬 Want to merge series episodes into one file? Use /newmerge.\n\n"
+        "💡 _Need assistance? Tap Help in the menu._",
+        reply_markup=_main_menu(),
     )
+
+
+@app.on_callback_query(filters.regex("^check_sub$"))
+async def cb_check_sub(client, query) -> None:
+    await query.answer()
+    if not await _check_subscription(client, query.from_user.id):
+        await query.answer(
+            "❌ You haven't joined yet. Please join the channel first.",
+            show_alert=True,
+        )
+        return
+    name = query.from_user.first_name or "there"
+    await query.message.edit_text(
+        f"✅ Thanks for joining, **{name}**!\n\n"
+        "You can now use the bot. Send any video or document to get a download link.",
+        reply_markup=_main_menu(),
+    )
+
+
+@app.on_callback_query(filters.regex("^help_menu$"))
+async def cb_help_menu(client, query) -> None:
+    await query.answer()
+    await query.message.edit_text(
+        "💡 **HELP**\n\n"
+        "🔹 Send me a video file (MP4 / MKV)\n"
+        "🔹 I reply with a direct download link\n"
+        "🔹 Click the link to download directly\n\n"
+        "🎬 **Merge Series Episodes**\n"
+        "🔹 /newmerge — start a merge session\n"
+        "🔹 Send all episodes (up to 15 GB total)\n"
+        "🔹 /merge — merges into one file with chapters\n"
+        "🔹 /cancel — abort the session",
+        reply_markup=_back_btn(),
+    )
+
+
+@app.on_callback_query(filters.regex("^about$"))
+async def cb_about(client, query) -> None:
+    await query.answer()
+    await query.message.edit_text(
+        "🤖 **BOT INFO**\n\n"
+        "🔹 Bot Name : Alaska File to Link\n"
+        "🔹 Framework : Pyrogram\n"
+        "🔹 Language : Python\n"
+        "🔹 Version : v3.0.0\n"
+        "🔹 Source : Private\n"
+        "🔹 Developer : Ajmal Yaseen",
+        reply_markup=_back_btn(),
+    )
+
+
+@app.on_callback_query(filters.regex("^back_home$"))
+async def cb_back_home(client, query) -> None:
+    await query.answer()
+    name = query.from_user.first_name or "there"
+    await query.message.edit_text(
+        f"👋 Hey **{name}**,\n\n"
+        "Your instant **File‑to‑Link** bot.\n"
+        "Send any video or document and I'll give you a direct download link "
+        f"that works in any browser — expires in **{config.EXPIRY_SECONDS // 3600} hours**.\n\n"
+        "🎬 Want to merge series episodes into one file? Use /newmerge.\n\n"
+        "💡 _Need assistance? Tap Help in the menu._",
+        reply_markup=_main_menu(),
+    )
+
+
+@app.on_callback_query(filters.regex("^close$"))
+async def cb_close(client, query) -> None:
+    await query.answer()
+    try:
+        await query.message.delete()
+    except Exception:  # noqa: BLE001
+        pass
 
 
 @app.on_message(filters.command("newmerge") & filters.private)
 async def cmd_newmerge(client: Client, message: Message) -> None:
     uid = message.from_user.id
     if not _authorized(uid):
+        return
+    if not await _check_subscription(client, uid):
+        await _force_sub_message(message)
         return
     if uid in merge_sessions:
         n = len(merge_sessions[uid]["messages"])
@@ -289,6 +413,9 @@ async def on_media(client: Client, message: Message) -> None:
     if not _authorized(uid):
         await message.reply_text("Sorry, you're not authorized to use this bot.")
         return
+    if not await _check_subscription(client, uid):
+        await _force_sub_message(message)
+        return
 
     info = _media_info(message)
     if info is None:
@@ -297,10 +424,23 @@ async def on_media(client: Client, message: Message) -> None:
 
     if file_size and file_size > config.MAX_FILE_BYTES:
         await message.reply_text(
-            f"⚠️ That file is {utils.format_size(file_size)}, which is over the "
-            f"{utils.format_size(config.MAX_FILE_BYTES)} limit."
+            f"⚠️ That file is {utils.format_size(file_size)}, which exceeds the "
+            f"{utils.format_size(config.MAX_FILE_BYTES)} per-file limit."
         )
         return
+
+    if uid in merge_sessions:
+        # Check total queued size won't exceed 15 GB.
+        queued_size = sum(
+            (_media_info(m) or ("", 0))[1] for m in merge_sessions[uid]["messages"]
+        )
+        if file_size and queued_size + file_size > config.MAX_MERGE_TOTAL_BYTES:
+            await message.reply_text(
+                f"⚠️ Adding this file would exceed the merge limit of "
+                f"{utils.format_size(config.MAX_MERGE_TOTAL_BYTES)}. "
+                "Send /merge to process what you have, or /cancel."
+            )
+            return
 
     if uid in merge_sessions:
         await _handle_episode(client, message, uid, file_name)
@@ -414,12 +554,19 @@ async def main() -> None:
     if config.SECRET_KEY == "change-me-to-a-long-random-secret":
         logger.warning("SECRET_KEY is still the default — change it in .env!")
 
-    # Start the HTTP server first so the port is open for platform health
-    # checks, then log in to Telegram and wire the client into the server.
     srv = build_server()
     server_task = asyncio.create_task(srv.serve())
     await app.start()
     server.tg_client = app
+
+    # Set bot command menu (shows in the '/' menu in Telegram).
+    await app.set_bot_commands([
+        BotCommand("start",    "🏠 Home"),
+        BotCommand("newmerge", "🎬 Start merge session"),
+        BotCommand("merge",    "⚡ Merge & get link"),
+        BotCommand("cancel",   "❌ Cancel merge session"),
+        BotCommand("help",     "💡 Help"),
+    ])
     logger.info("Bot started. Download server on %s:%d", config.HTTP_HOST, config.HTTP_PORT)
     logger.info("Public base URL: %s", config.BASE_URL)
 
