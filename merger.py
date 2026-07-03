@@ -114,12 +114,18 @@ async def merge_videos(user_id: int, files: List[Path]) -> Path:
 
     cmd = [
         config.FFMPEG_BINARY, "-y",
-        "-f", "concat", "-safe", "0", "-i", str(list_path),
+        "-f", "concat", "-safe", "0",
+        "-i", str(list_path),
         "-i", str(meta_path),
         "-map", "0",
         "-map_metadata", "1",
         "-map_chapters", "1",
-        "-c", "copy",   # stream copy — no re-encode, lossless, fast
+        "-c", "copy",
+        # Reset timestamps at each segment boundary so they increase
+        # monotonically across episodes. Without this, each episode's
+        # timestamps restart at 0 → wrong total duration, broken seeking,
+        # chapter markers at wrong positions.
+        "-reset_timestamps", "1",
         str(output),
     ]
     code, log = await _run(cmd)
